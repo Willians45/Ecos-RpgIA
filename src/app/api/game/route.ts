@@ -26,38 +26,29 @@ export async function POST(req: Request) {
       
       PERSONALIDAD DEL MASTER:
       - Eres un narrador crudo, oscuro y con humor negro. No ayudes al jugador.
-      - Si el jugador hace algo estúpido o intenta una broma floja, sé cruel.
-      - Tu prioridad es la consistencia del mundo y la letalidad.
+      - Si el jugador hace algo estúpido, sé cruel. La letalidad es tu marca.
 
-      GUÍA DE NPCs (ORCOS):
-      - Los orcos son brutos, agresivos y de gramática simplificada.
-      - Dialecto: "YO MACHACAR", "TU SER COMIDA", "HUELES A MIEDO". No usan palabras sofisticadas.
-      - Psicología: No caen en bromas infantiles. Son impulsivos pero muy territoriales.
-      - Vulnerabilidad: Solo caen ante "jugarretas" o tretas que involucren sus instintos (comida, ganchos de pelea, odio a otras razas) si el jugador las describe con detalle y lógica.
+      CONTEXTO MULTIJUGADOR (GRUPO):
+      - Estás dirigiendo a un GRUPO de aventureros. Usa plurales cuando hables de sus acciones generales ("Hacéis", "Camináis", "El grupo se detiene").
+      - IDENTIFICA OBJETIVOS: Si una acción provoca daño o da un objeto, debes elegir a un objetivo específico (generalmente quien actuó, pero podrías golpear a otro por "error" o daño de área).
+      - RECONOCE A LOS COMPAÑEROS: Menciona qué hacen los demás mientras el jugador actual actúa. No los ignores.
 
-      REGLAS DE RESOLUCIÓN:
-      1. Evalúa el intento del jugador basado en sus atributos (${JSON.stringify(gameState.character?.attributes)}).
-      2. NPCs como el "Guardia Orco" reaccionarán con violencia inmediata ante insultos o intentos fallidos de engaño.
-      3. No permitas que el jugador avance "porque sí". Cada paso debe ser sudado.
-
-      CONTEXTO DEL GRUPO:
-      ${gameState.players?.map((p: any) => `- ${p.name} (${p.race}): HP ${p.hp}/${p.maxHp}`).join('\n') || '- Solo ' + gameState.character?.name}
+      LISTA DE JUGADORES (CONTEXTO):
+      ${gameState.players?.map((p: any) => `- ID: ${p.id}, Nombre: ${p.name}, Raza: ${p.race}, HP: ${p.hp}/${p.maxHp}`).join('\n') || '- Solo ' + gameState.character?.name}
       
       ENTORNO ACTUAL: ${gameState.currentRoom?.name || 'Lugar Desconocido'}
       ${gameState.currentRoom?.description || 'Oscuridad total.'}
-      Objetivo de la zona: ${gameState.currentRoom?.goal || 'Sobrevivir'}
-      ENTIDADES PRESENTES: ${gameState.currentRoom?.entities?.map((e: any) => `${e.name} (${e.race}): ${e.description}`).join(' | ') || 'Ninguna'}
+      ENTIDADES: ${gameState.currentRoom?.entities?.map((e: any) => `${e.name} (${e.race})`).join(', ') || 'Ninguna'}
       
-      PERSONAJE ACTUAL REALIZANDO LA ACCIÓN:
-      - Nombre: ${gameState.character?.name}
-      - Raza: ${gameState.character?.race}
-      - Inventario: ${gameState.character?.inventory?.join(', ') || 'Vacío'}
-      
-      ACCION DEL JUGADOR: ${userInput}
+      ESTADO MENTAL ORCO (Si hay orcos):
+      - Brutos, agresivos, hablan como: "YO MACHACAR", "TU TENER COSA BRILLANTE". No caen en bromas infantiles.
+
+      ACCION REALIZADA POR (${gameState.character?.name}, ID: ${gameState.character?.id}): ${userInput}
       
       Responde ESTRICTAMENTE en JSON:
       {
-        "narrative": "Tu respuesta narrativa incluyendo diálogos de NPCs si los hay",
+        "narrative": "Respuesta grupal mencionando a los presentes y los diálogos NPCs",
+        "targetPlayerId": "ID del jugador afectado específicamente (null si afecta a todos o a ninguno)",
         "hpDelta": 0,
         "itemGained": null,
         "nextRoomId": null,
@@ -82,7 +73,16 @@ export async function POST(req: Request) {
       throw new Error("La IA devolvió una respuesta vacía.");
     }
 
-    return NextResponse.json(JSON.parse(responseContent));
+    const parsedResponse = JSON.parse(responseContent);
+
+    // Si la IA no envía targetPlayerId, por defecto es quien realizó la acción
+    if (parsedResponse.hpDelta !== 0 || parsedResponse.itemGained) {
+      if (!parsedResponse.targetPlayerId) {
+        parsedResponse.targetPlayerId = gameState.character?.id;
+      }
+    }
+
+    return NextResponse.json(parsedResponse);
 
   } catch (error: any) {
     console.error("DETALLE DEL ERROR EN API/GAME:", error);
