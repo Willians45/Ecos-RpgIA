@@ -322,6 +322,14 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
                             </div>
                         ))}
                     </div>
+
+                    {/* Restauración del Código de Sala */}
+                    <div className="mt-4 pt-4 border-t border-white/10">
+                        <div className="bg-purple-950/20 p-2 rounded-sm border border-purple-900/30">
+                            <div className="text-[7px] text-purple-600 uppercase font-black tracking-widest mb-1">Código de Invitación</div>
+                            <div className="text-[12px] font-mono text-white select-all text-center tracking-widest">{state.roomId}</div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
