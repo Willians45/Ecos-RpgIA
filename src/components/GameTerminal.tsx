@@ -76,16 +76,21 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
         }
     }, [state.history, isTyping, pendingActions]);
 
-    // Supabase Realtime: Broadcast y Presence
+    const isProcessing = useRef(false);
+    const channelRef = useRef<any>(null);
+
+    // Suscripción Realtime (Broadcast y Presence)
     useEffect(() => {
         if (!state.roomId || !state.character) return;
 
         const channel = supabase.channel(`room-${state.roomId}`, {
             config: {
-                broadcast: { self: false }, // El líder ya se actualiza localmente
+                broadcast: { self: false },
                 presence: { key: state.character.id },
             },
         });
+
+        channelRef.current = channel;
 
         channel
             .on('broadcast', { event: 'new_message' }, ({ payload }) => {
@@ -101,24 +106,24 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
                 });
             })
             .on('broadcast', { event: 'player_action' }, ({ payload }) => {
+                console.log("Recibida acción de otro jugador:", payload);
                 setPendingActions(prev => {
-                    const alreadyIn = prev.some(a => a.playerId === payload.playerId);
-                    if (alreadyIn) return prev;
+                    if (prev.some(a => a.playerId === payload.playerId)) return prev;
                     return [...prev, payload];
                 });
             })
             .on('broadcast', { event: 'turn_complete' }, ({ payload }) => {
+                console.log("Turno completado recibido por broadcast");
                 applyTurnResult(payload);
             })
             .on('presence', { event: 'sync' }, () => {
-                const newState = channel.presenceState();
+                const presenceState = channel.presenceState();
                 const players: Player[] = [];
-                Object.values(newState).forEach((presence: any) => {
+                Object.values(presenceState).forEach((presence: any) => {
                     if (presence[0]?.player) players.push(presence[0].player);
                 });
+                console.log("Presencia sincronizada. Jugadores online:", players.length);
                 setOnlinePlayers(players);
-                // No actualizamos state.players aquí para no sobreescribir datos de combate del motor
-                // Solo usamos presence para la lista visual de "quién está online"
             })
             .subscribe(async (status) => {
                 if (status === 'SUBSCRIBED') {
@@ -126,17 +131,18 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
                 }
             });
 
-        return () => { supabase.removeChannel(channel); };
-    }, [state.roomId, state.character?.id, setState, applyTurnResult]);
-
-    const isProcessing = useRef(false);
+        return () => {
+            supabase.removeChannel(channel);
+            channelRef.current = null;
+        };
+    }, [state.roomId, state.character?.id, applyTurnResult]); // Quitamos 'state' para evitar re-suscripciones constantes
 
     // Lógica para procesar el turno
     useEffect(() => {
         const runTurn = async () => {
-            // Condición: Tenemos todas las acciones y no estamos ya procesando
             const allReady = onlinePlayers.length > 0 && pendingActions.length >= onlinePlayers.length;
 
+            // Bloqueo de entrada para evitar re-ejecuciones
             if (allReady && !isProcessing.current && !isTyping) {
                 const sortedPlayers = [...onlinePlayers].sort((a, b) => a.id.localeCompare(b.id));
                 const isLeader = sortedPlayers[0].id === state.character?.id;
@@ -146,45 +152,52 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
                     setIsTyping(true);
 
                     try {
-                        console.log("--- PROCESANDO TURNO (LÍDER) ---");
+                        console.log("--- INICIANDO TURNO (LÍDER) ---");
                         const response = await fetch('/api/game', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
-                                gameState: state,
+                                gameState: state, // Aquí usamos el estado actual
                                 actions: pendingActions
                             })
                         });
 
                         const data = await response.json();
 
-                        if (data.narrative && state.roomId) {
-                            // Primero emitimos para los demás
-                            await supabase.channel(`room-${state.roomId}`).send({
-                                type: 'broadcast',
-                                event: 'turn_complete',
-                                payload: data
-                            });
-                            // Luego aplicamos localmente
-                            applyTurnResult(data);
-                        } else {
+                        if (data.error) {
+                            console.error("Error de la API:", data.error);
                             setIsTyping(false);
+                            setPendingActions([]); // Resetear aunque falle para desbloquear
+                            setHasSentAction(false);
+                        } else if (state.roomId) {
+                            console.log("Turno procesado con éxito. Notificando a otros...");
+                            if (channelRef.current) {
+                                await channelRef.current.send({
+                                    type: 'broadcast',
+                                    event: 'turn_complete',
+                                    payload: data
+                                });
+                            }
+                            applyTurnResult(data);
                         }
                     } catch (error) {
-                        console.error("Error en turno:", error);
+                        console.error("Fallo crítico en turno:", error);
                         setIsTyping(false);
+                        setPendingActions([]);
+                        setHasSentAction(false);
                     } finally {
                         isProcessing.current = false;
                     }
                 } else {
-                    // Seguidores: solo marcan visualmente que se está procesando
+                    console.log("--- ESPERANDO TURNO (SEGUIDOR) ---");
                     setIsTyping(true);
                 }
             }
         };
 
         runTurn();
-    }, [pendingActions.length, onlinePlayers.length, isTyping, state.roomId, applyTurnResult]);
+    }, [pendingActions.length, onlinePlayers.length, isTyping, state.roomId, applyTurnResult, state]);
+    // Añadimos 'state' a las dependencias para evitar cierres obsoletos (stale closures)
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
