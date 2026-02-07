@@ -7,197 +7,183 @@ export interface Action {
 }
 
 export interface ActionResult {
-    narrative: string; // La "semilla" narrativa para la IA (ej: "Ataque exitoso, 5 daño")
+    narrative: string;
     newState: GameState;
     events: GameEvent[];
+    diceRolls: { label: string; value: number; dc: number; success: boolean }[];
 }
 
 export interface GameEvent {
-    type: 'damage' | 'heal' | 'item_gain' | 'item_loss' | 'room_change' | 'flag_set' | 'info';
+    type: 'damage' | 'heal' | 'item_gain' | 'item_loss' | 'room_change' | 'flag_set' | 'info' | 'absurd';
     targetId?: string;
     value?: any;
     description: string;
 }
 
-// Helper para tiradas de dados
 const rollDice = (sides: number) => Math.floor(Math.random() * sides) + 1;
 
 export function processTurn(currentState: GameState, actions: Action[]): ActionResult {
-    let newState = JSON.parse(JSON.stringify(currentState)); // Copia profunda
+    let newState = JSON.parse(JSON.stringify(currentState));
     const events: GameEvent[] = [];
     const narrativeSeeds: string[] = [];
+    const diceRolls: ActionResult['diceRolls'] = [];
+    const currentRoom = INITIAL_ROOMS[newState.currentRoomId];
 
-    // Procesar acciones secuencialmente (por ahora, luego se podría hacer por iniciativa)
     for (const action of actions) {
         const player = newState.players.find((p: Player) => p.id === action.playerId);
-        if (!player || player.hp <= 0) continue; // Muertos no actúan
+        if (!player || player.hp <= 0) continue;
 
         const input = action.content.toLowerCase();
-        const currentRoom = INITIAL_ROOMS[newState.currentRoomId]; // This one is kept as it correctly reflects the room for the current action
 
-        // --- LÓGICA DE COMBATE BÁSICA ---
-        if (input.includes('atacar') || input.includes('golpear') || input.includes('matar')) {
-            // Identificar objetivo (muy simple por ahora: buscar primer enemigo vivo)
-            const visibleEnemies = currentRoom.entities.filter((e: any) =>
-                e.isEnemy && (!e.missingFlag || !newState.worldState[e.missingFlag])
-            );
+        // 1. DETECCIÓN DE ACCIONES ABSURDAS (Muros de contención para la IA)
+        const isAbsurd = /volar|teletransportar|destruir el mundo|saltar 10 pisos|matar a todos|superpoder|invencible|crear/.test(input);
 
-            if (visibleEnemies.length > 0) {
-                const target = visibleEnemies[0]; // Ataca al primero por defecto
+        if (isAbsurd) {
+            events.push({ type: 'absurd', description: 'Acción físicamente imposible' });
+            narrativeSeeds.push(`${player.name} intenta algo ridículo: "${input}". REGLA: Fracaso absoluto. Búrlate del jugador de forma cínica.`);
+            continue;
+        }
 
-                // Tirada de ataque: d20 + Fuerza vs AC arbitraria (12)
+        // 2. MODO COMBATE (DETERMINISTA)
+        if (input.includes('atacar') || input.includes('golpear') || input.includes('matar') || input.includes('pelear')) {
+            const enemies = currentRoom.entities.filter(e => e.isEnemy && !newState.worldState[`${e.id}_muerto`]);
+            if (enemies.length > 0) {
+                const target = enemies[0];
                 const roll = rollDice(20);
-                const hitChance = roll + player.attributes.fuerza;
+                const total = roll + player.attributes.fuerza;
+                const dc = 12; // Clase de Armadura base
+                const success = total >= dc;
 
-                if (hitChance >= 12) {
-                    // Acierto
-                    const damage = Math.max(1, Math.floor(player.attributes.fuerza / 2) + rollDice(4));
-                    target.hp = (target.hp || 0) - damage;
+                diceRolls.push({ label: `Ataque de ${player.name}`, value: total, dc, success });
 
-                    newState.inCombat = true; // Entrar en combate al atacar
-                    narrativeSeeds.push(`${player.name} ataca a ${target.name} y ACIERTA (Roll ${roll}+${player.attributes.fuerza}). Daño: ${damage}. HP Restante: ${target.hp}.`);
+                if (success) {
+                    const dmg = Math.max(2, Math.floor(player.attributes.fuerza / 2) + rollDice(6));
+                    target.hp = (target.hp || 30) - dmg;
+                    newState.inCombat = true;
+                    narrativeSeeds.push(`${player.name} ataca a ${target.name} y ACIERTA (${total} vs DC ${dc}). Daño: ${dmg}. HP: ${target.hp}.`);
 
                     if (target.hp <= 0) {
-                        narrativeSeeds.push(`${target.name} ha MUERTO.`);
-                        // Actualizar flag de muerte
-                        if (target.id === 'guardia_orco') newState.worldState['guardia_muerto'] = true;
+                        newState.worldState[`${target.id}_muerto`] = true;
+                        newState.worldState['llave_tomada'] = true; // El guardia suelta la llave al morir
+                        narrativeSeeds.push(`${target.name} ha muerto y soltado la Llave de la Celda.`);
                     }
                 } else {
-                    // Fallo
-                    newState.inCombat = true; // Entrar en combate aunque falles
-                    narrativeSeeds.push(`${player.name} ataca a ${target.name} pero FALLA (Roll ${roll}+${player.attributes.fuerza}).`);
+                    newState.inCombat = true;
+                    narrativeSeeds.push(`${player.name} intenta atacar a ${target.name} pero FALLA estrepitosamente (${total} vs DC ${dc}).`);
                 }
             } else {
-                narrativeSeeds.push(`${player.name} intenta atacar, pero no hay enemigos vivos.`);
+                narrativeSeeds.push(`${player.name} lanza golpes al aire, no hay enemigos.`);
             }
         }
 
-        // --- LÓGICA DE INVENTARIO ---
+        // 3. MODO ELOCUENCIA (PERSUASIÓN / INTIMIDACIÓN / ENGAÑO)
+        else if (input.includes('hablar') || input.includes('convencer') || input.includes('engañar') || input.includes('intimidar') || input.includes('decir')) {
+            const guard = currentRoom.entities.find(e => e.id === 'guardia_orco' && !newState.worldState['guardia_muerto']);
+
+            if (guard) {
+                const roll = rollDice(20);
+                const total = roll + player.attributes.presencia;
+                let dc = 15; // DC base para elocuencia
+
+                if (input.includes('intimidar')) dc = 12; // Orco respeta la fuerza
+                if (input.includes('convencer')) dc = 18; // El orco es testarudo
+
+                const success = total >= dc;
+                diceRolls.push({ label: `Elocuencia de ${player.name}`, value: total, dc, success });
+
+                if (success) {
+                    if (input.includes('intimidar')) {
+                        newState.worldState['guardia_distraido'] = true;
+                        narrativeSeeds.push(`${player.name} intimida al guardia. El orco retrocede asustado y deja caer el candelabro.`);
+                    } else {
+                        newState.worldState['puerta_celda_abierta'] = true;
+                        narrativeSeeds.push(`${player.name} convence al guardia de que hay un error. ¡El orco abre la celda!`);
+                    }
+                } else {
+                    newState.inCombat = true; // El fracaso en elocuencia inicia combate freq.
+                    narrativeSeeds.push(`${player.name} intenta hablar, pero el orco se ríe de su debilidad (${total} vs DC ${dc}). El guardia se pone agresivo.`);
+                }
+            } else {
+                narrativeSeeds.push(`${player.name} habla solo, no hay nadie que escuche.`);
+            }
+        }
+
+        // 4. MOVIMIENTO Y EXPLORACIÓN
+        else if (input.includes('ir') || input.includes('moverse') || input.includes('entrar') || input.includes('salir') || input.includes('norte') || input.includes('sur')) {
+            const exit = currentRoom.exits.find(e => input.includes(e.direction.toLowerCase()) || input.includes('salir'));
+            if (exit) {
+                if (!exit.condition || newState.worldState[exit.condition]) {
+                    newState.currentRoomId = exit.targetRoomId;
+                    events.push({ type: 'room_change', value: exit.targetRoomId, description: `Moviendo a ${exit.targetRoomId}` });
+                    narrativeSeeds.push(`${player.name} se mueve hacia ${exit.direction}.`);
+                } else {
+                    narrativeSeeds.push(`${player.name} intenta salir, pero: ${exit.lockedMessage}`);
+                }
+            } else {
+                narrativeSeeds.push(`${player.name} busca una salida pero no sabe a dónde ir.`);
+            }
+        }
+
+        // 5. RECOGER OBJETOS
         else if (input.includes('coger') || input.includes('tomar') || input.includes('agarrar')) {
-            // Buscar item mencionado
-            const visibleItems = currentRoom.items.filter((i: any) =>
+            const item = currentRoom.items.find(i =>
+                (input.includes(i.name.toLowerCase()) || input.includes(i.id)) &&
                 (!i.requiredFlag || newState.worldState[i.requiredFlag]) &&
                 (!i.missingFlag || !newState.worldState[i.missingFlag])
             );
 
-            let itemTaken = null;
-            for (const item of visibleItems) {
-                if (input.includes(item.name.toLowerCase()) || input.includes(item.id)) {
-                    itemTaken = item;
-                    break;
-                }
-                // Fallback simple: si dice "candelabro"
-                if (input.includes('candelabro') && item.id === 'candelabro') itemTaken = item;
-                if (input.includes('llave') && item.id === 'llave_celda') itemTaken = item;
-            }
-
-            if (itemTaken) {
-                player.inventory.push(itemTaken.name);
-                events.push({ type: 'item_gain', targetId: player.id, value: itemTaken.name, description: `Cogió ${itemTaken.name}` });
-
-                // Marcar como tomado globalmente
-                if (itemTaken.id === 'candelabro') newState.worldState['candelabro_tomado'] = true;
-                if (itemTaken.id === 'llave_celda') newState.worldState['llave_tomada'] = true;
-
-                narrativeSeeds.push(`${player.name} recoge ${itemTaken.name}.`);
+            if (item) {
+                player.inventory.push(item.name);
+                newState.worldState[`${item.id}_tomado`] = true;
+                events.push({ type: 'item_gain', targetId: player.id, value: item.name, description: `Obtuvo ${item.name}` });
+                narrativeSeeds.push(`${player.name} recoge el ${item.name}.`);
             } else {
-                narrativeSeeds.push(`${player.name} intenta coger algo pero no lo encuentra o ya no está.`);
+                narrativeSeeds.push(`${player.name} intenta agarrar algo que no está o es inalcanzable.`);
             }
         }
 
-        // --- LÓGICA DE MOVIMIENTO ---
-        else if (input.includes('abrir') || input.includes('entrar') || input.includes('ir') || input.includes('norte') || input.includes('sur')) {
-            // Lógica simplificada de puertas
-            if (input.includes('puerta') && newState.currentRoomId === 'start') {
-                if (newState.worldState['guardia_muerto'] || player.inventory.includes('Llave de la Celda')) {
-                    newState.worldState['puerta_celda_abierta'] = true;
-                    narrativeSeeds.push(`${player.name} abre la puerta de la celda.`);
-                } else {
-                    narrativeSeeds.push(`${player.name} intenta abrir la puerta pero está cerrada con llave.`);
-                }
-            }
-
-            // Check salidas
-            const exit = currentRoom.exits.find((e: any) => input.includes(e.direction.toLowerCase()) || input.includes('salir'));
-            if (exit) {
-                if (!exit.condition || newState.worldState[exit.condition]) {
-                    newState.currentRoomId = exit.targetRoomId;
-                    events.push({ type: 'room_change', value: exit.targetRoomId, description: `Grupo mueve a ${exit.targetRoomId}` });
-                    narrativeSeeds.push(`${player.name} lidera al grupo hacia ${exit.direction}.`);
-                } else {
-                    narrativeSeeds.push(`${player.name} intenta ir hacia ${exit.direction} pero el camino está bloqueado (${exit.lockedMessage}).`);
-                }
-            }
-        }
-
-        // --- ACCIONES GENÉRICAS ---
+        // 6. ACCIONES DE OBSERVACIÓN (No mecánicas)
         else {
-            // Para acciones exploratorias/narrativas, dar contexto de sala
-            narrativeSeeds.push(`${player.name} realiza: "${input}". RECUERDA: Están en "${currentRoom.name}". Describe elementos de ESTA sala solamente.`);
+            narrativeSeeds.push(`${player.name} observa: "${input}". Sin impacto mecánico. Describe la atmósfera de ${currentRoom.name} de forma cínica.`);
         }
     }
 
-    // --- TURNO DE LOS ENEMIGOS (IA PRIMITIVA) ---
-    // Solo atacan si hay combate activo
+    // TURNO ENEMIGO (Si hay combate)
     if (newState.inCombat) {
-        const currentRoom = INITIAL_ROOMS[newState.currentRoomId]; // This declaration is now the correct one for enemy turn
-        const enemies = currentRoom.entities.filter((e: any) =>
-            e.isEnemy && (!e.missingFlag || !newState.worldState[e.missingFlag]) && (e.hp || 0) > 0
-        );
-
+        const enemies = currentRoom.entities.filter(e => e.isEnemy && !newState.worldState[`${e.id}_muerto`]);
         for (const enemy of enemies) {
-            if (!enemy.damage) continue;
-
-            // Elegir objetivo aleatorio vivo
             const livingPlayers = newState.players.filter((p: Player) => p.hp > 0);
-
             if (livingPlayers.length > 0) {
-                const targetPlayer = livingPlayers[Math.floor(Math.random() * livingPlayers.length)];
-
-                // Tirada de ataque enemigo (Simplificada: 50% chance base + daño masivo)
-                // Ojo: Si el orco tiene +4 al hit, y player AC es 12. 
-                // Roll 1d20. Si (roll + 4) >= 12 -> Hit. (Roll >= 8). 65% hit rate.
+                const target = livingPlayers[Math.floor(Math.random() * livingPlayers.length)];
                 const roll = rollDice(20);
-                if (roll >= 8) {
-                    const dmg = rollDice(enemy.damage); // Daño 1d6 (letalidad moderada)
-                    targetPlayer.hp = Math.max(0, targetPlayer.hp - dmg);
-                    events.push({ type: 'damage', targetId: targetPlayer.id, value: dmg, description: `${enemy.name} golpea a ${targetPlayer.name}` });
-                    narrativeSeeds.push(`EL ENEMIGO ${enemy.name} ATACA a ${targetPlayer.name} y ACIERTA haciendo ${dmg} de daño.`);
-
-                    if (targetPlayer.hp <= 0) {
-                        narrativeSeeds.push(`${targetPlayer.name} ha caído INCONSCIENTE.`);
-                        // Check game over
+                if (roll >= 10) {
+                    const dmg = rollDice(enemy.damage || 6);
+                    target.hp = Math.max(0, target.hp - dmg);
+                    narrativeSeeds.push(`${enemy.name} ataca a ${target.name} y DAÑA (${dmg} de daño). HP: ${target.hp}.`);
+                    if (target.hp <= 0) {
+                        narrativeSeeds.push(`¡${target.name} ha caído ante la fuerza del orco!`);
                         if (newState.players.every((p: Player) => p.hp <= 0)) {
                             newState.isGameOver = true;
                             newState.gameStatus = 'death';
                         }
                     }
                 } else {
-                    narrativeSeeds.push(`EL ENEMIGO ${enemy.name} lanza un golpe a ${targetPlayer.name} pero FALLA.`);
+                    narrativeSeeds.push(`${enemy.name} lanza un golpe torpe que ${target.name} esquiva.`);
                 }
             }
         }
     }
 
-    // --- VERIFICACIÓN DE FIN DE COMBATE ---
-    // Si estábamos en combate, verificar si quedan enemigos vivos en la sala
-    if (newState.inCombat) {
-        const currentRoom = INITIAL_ROOMS[newState.currentRoomId];
-        const remainingEnemies = currentRoom.entities.some((e: any) =>
-            e.isEnemy && (!e.missingFlag || !newState.worldState[e.missingFlag]) && (e.hp || 0) > 0
-        );
-
-        if (!remainingEnemies) {
-            newState.inCombat = false;
-            events.push({ type: 'info', description: 'Combate finalizado' });
-            narrativeSeeds.push(`El silencio vuelve a la sala. La amenaza ha sido neutralizada.`);
-        }
+    // VERIFICAR VICTORIA
+    if (newState.currentRoomId === 'victory_room') {
+        newState.isGameOver = true;
+        newState.gameStatus = 'victory';
     }
 
-    // Construir el string final para la IA
     return {
         narrative: narrativeSeeds.join('\n'),
         newState,
-        events
+        events,
+        diceRolls
     };
 }

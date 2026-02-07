@@ -23,6 +23,7 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
     const [onlinePlayers, setOnlinePlayers] = useState<Player[]>([]);
     const [pendingActions, setPendingActions] = useState<PendingAction[]>([]);
     const [hasSentAction, setHasSentAction] = useState(false);
+    const [lastDiceRolls, setLastDiceRolls] = useState<any[]>([]);
     const scrollRef = useRef<HTMLDivElement>(null);
 
     // Derivar la sala actual del ID
@@ -104,6 +105,7 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
                 setPendingActions([]);
                 setHasSentAction(false);
                 setIsTyping(false);
+                if (payload.diceRolls) setLastDiceRolls(payload.diceRolls);
             })
             .on('presence', { event: 'sync' }, () => {
                 const newState = channel.presenceState();
@@ -265,6 +267,21 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
                     </div>
                     {isTyping && <Clock className="w-3 h-3 text-purple-500 animate-spin" />}
                 </div>
+
+                {/* Visualización de Dados */}
+                {lastDiceRolls.length > 0 && (
+                    <div className="bg-purple-950/20 border-b border-purple-500/20 p-2 flex gap-2 overflow-x-auto">
+                        {lastDiceRolls.map((roll, i) => (
+                            <div key={i} className={cn("text-[9px] px-2 py-1 rounded-sm border flex items-center gap-2 whitespace-nowrap",
+                                roll.success ? "border-green-500/50 bg-green-500/10 text-green-400" : "border-rose-500/50 bg-rose-500/10 text-rose-400")}>
+                                <div className="font-black">1d20</div>
+                                <div className="font-bold text-xs">{roll.value}</div>
+                                <div className="opacity-50">vs DC {roll.dc}</div>
+                                <div className="font-black italic uppercase">{roll.success ? 'ÉXITO' : 'FALLO'}</div>
+                            </div>
+                        ))}
+                    </div>
+                )}
 
                 {/* Historial */}
                 <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-6 scroll-smooth">

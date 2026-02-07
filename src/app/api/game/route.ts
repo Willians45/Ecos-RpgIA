@@ -22,7 +22,7 @@ export async function POST(req: Request) {
     if (!gameState.worldState) gameState.worldState = {};
     if (!gameState.currentRoomId) gameState.currentRoomId = 'start'; // Fallback compatibilidad
 
-    const { narrative: engineNarrative, newState, events } = processTurn(gameState, actions);
+    const { narrative: engineNarrative, newState, events, diceRolls } = processTurn(gameState, actions);
 
     // 2. NARRATIVA INTELLIGENTE (IA)
     // La IA ahora actúa como "renderizador de texto". No decide qué pasa, solo lo cuenta bonito.
@@ -31,30 +31,39 @@ export async function POST(req: Request) {
     // Información de la sala actual (CONTEXTO CRÍTICO)
     const currentRoom = INITIAL_ROOMS[newState.currentRoomId];
 
+    // Snapshot del estado del mundo para evitar alucinaciones
+    const worldSnapshot = `
+      SALA ACTUAL: ${currentRoom.name}
+      ESTADO MUNDIAL:
+      - Guardia Orco: ${newState.worldState['guardia_muerto'] ? 'MUERTO (Yace como un cadáver)' : 'VIVO y Vigilando'}
+      - Puerta Celda: ${newState.worldState['puerta_celda_abierta'] ? 'ABIERTA' : 'CERRADA'}
+      - Inventario Jugador: ${newState.character?.inventory.join(', ') || 'Vacío'}
+      - Combate Activo: ${newState.inCombat ? 'SÍ' : 'NO'}
+    `;
+
     const systemPrompt = `
-      ERES EL NARRADOR DE UN JUEGO DE ROL. Tu trabajo es describir lo que pasa SIN inventar nada.
+      ERES EL NARRADOR DE UNA DEMO DE RPG. Tu única función es embellecer los resultados mecánicos.
       
       ═══════════════════════════════════════════════════════════════
-      LOCALIZACIÓN ACTUAL (NO PUEDES CAMBIAR ESTO):
+      ESTADO REAL DEL MUNDO (PROHIBIDO CONTRADECIR):
       ═══════════════════════════════════════════════════════════════
-      SALA: ${currentRoom.name}
-      DESCRIPCIÓN BASE: ${currentRoom.description}
+      ${worldSnapshot}
       
       ═══════════════════════════════════════════════════════════════
-      LO QUE ACABA DE PASAR (MOTOR DE JUEGO):
+      RESULTADOS DEL MOTOR (HECHOS INMUTABLES):
       ═══════════════════════════════════════════════════════════════
       ${engineNarrative}
+      ${diceRolls.map(r => `[DADO: ${r.label} | Resultado: ${r.value} | DC: ${r.dc} | ${r.success ? 'ÉXITO' : 'FALLO'}]`).join('\n')}
       
       ═══════════════════════════════════════════════════════════════
-      INSTRUCCIONES ESTRICTAS:
+      INSTRUCCIONES NARRATIVAS:
       ═══════════════════════════════════════════════════════════════
+      1. NO INVENTES: Si el motor dice que el orco está muerto, NO lo describas respirando.
+      2. ABSURDO: Si el jugador intenta algo físicamente imposible (volar, teleport), búrlate de él de forma sarcástica.
+      3. TONO: Dark Fantasy, cínico, breve.
+      4. TIRADAS: Menciona sutilmente el resultado del dado si fue un éxito o fallo crítico/ajustado.
       
-      1. **LOCALIZACIÓN FIJA**: Estás en "${currentRoom.name}". NO inventes callejones, bosques ni otras salas.
-      2. **SOLO DESCRIBE LOS HECHOS**: El motor te dice qué pasó. Tú solo narras cómo se sintió o se vio.
-      3. **BREVEDAD OBLIGATORIA**: Máximo 2-3 oraciones. Nada de párrafos épicos.
-      4. **SI NO PASÓ NADA**: Describe solo lo que el jugador ve EN ESTA SALA (usa la descripción base de arriba).
-      
-      RESPONDE SOLO CON LA NARRATIVA. SIN METADATOS NI NOTAS.
+      Máximo 2-3 oraciones. NO escribas párrafos largos.
     `;
 
 

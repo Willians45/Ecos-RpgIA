@@ -133,41 +133,28 @@ export const INITIAL_ROOMS: Record<string, Room> = {
   'start': {
     id: 'start',
     name: 'La Celda de los Lamentos',
-    description: 'Te despiertas en una celda húmeda. El olor a moho es insoportable. Un candelabro de hierro cuelga peligrosamente del techo.',
+    description: 'Te despiertas en una celda húmeda. El aire huele a moho y desesperación. Un orco gigante te observa tras los barrotes mientras juega con un candelabro de hierro.',
     entities: [
       {
         id: 'guardia_orco',
         name: 'Guardia Orco',
         description: 'Un orco corpulento con una armadura de cuero remendada. Parece aburrido pero peligroso.',
         race: 'Orco',
-        hp: 20,
-        maxHp: 20,
-        damage: 6,
+        hp: 30,
+        maxHp: 30,
+        damage: 8,
         isEnemy: true,
-        missingFlag: 'guardia_muerto' // Desaparece si está muerto
-      },
-      {
-        id: 'cadaver_guardia',
-        name: 'Cuerpo del Guardia Orco',
-        description: 'El cuerpo sin vida del orco yace en el suelo, soltando un charco de sangre oscura.',
-        requiredFlag: 'guardia_muerto' // Aparece solo si el guardia murió
+        missingFlag: 'guardia_muerto'
       }
     ],
     items: [
       {
         id: 'candelabro',
-        name: 'Candelabro Oxidado',
-        description: 'Viejo, pesado y con bordes afilados. Podría servir como arma.',
+        name: 'Candelabro de Hierro',
+        description: 'Pesado y contundente. El guardia lo usa para distraerse.',
         isTakeable: true,
-        missingFlag: 'candelabro_tomado'
-      },
-      {
-        id: 'llave_celda',
-        name: 'Llave de la Celda',
-        description: 'Una llave tosca de hierro. Estaba en el cinto del guardia.',
-        isTakeable: true,
-        requiredFlag: 'guardia_muerto', // Solo accesible si matas al guardia (o se la robas con skill check, lógica futura)
-        missingFlag: 'llave_tomada'
+        missingFlag: 'candelabro_tomado',
+        requiredFlag: 'guardia_distraido' // Solo se puede tomar si está distraído o muerto
       }
     ],
     exits: [
@@ -175,14 +162,14 @@ export const INITIAL_ROOMS: Record<string, Room> = {
         direction: 'Norte',
         targetRoomId: 'hallway',
         condition: 'puerta_celda_abierta',
-        lockedMessage: 'La puerta de la celda está cerrada. Necesitas abrirla o romperla.'
+        lockedMessage: 'La puerta de hierro está cerrada con llave.'
       }
     ]
   },
   'hallway': {
     id: 'hallway',
     name: 'Pasillo de la Vigilancia',
-    description: 'Un pasillo angosto de piedra. Antorchas parpadean en las paredes.',
+    description: 'Un corredor estrecho iluminado por antorchas parpadeantes. Al fondo se ve la salida.',
     entities: [],
     items: [],
     exits: [
@@ -190,15 +177,15 @@ export const INITIAL_ROOMS: Record<string, Room> = {
       {
         direction: 'Exterior',
         targetRoomId: 'victory_room',
-        condition: 'porton_principal_abierto',
-        lockedMessage: 'El gran portón de hierro está cerrado a cal y canto.'
+        condition: 'llave_tomada',
+        lockedMessage: 'Necesitas la llave del guardia para salir.'
       }
     ]
   },
   'victory_room': {
     id: 'victory_room',
     name: 'Libertad',
-    description: 'El aire fresco de la noche te golpea. Eres libre.',
+    description: 'El aire fresco de la libertad te golpea. Has escapado de los Ecos de la Mazmorra.',
     entities: [],
     items: [],
     exits: []
