@@ -2,14 +2,14 @@ import { NextResponse } from 'next/server';
 import { Groq } from 'groq-sdk';
 
 const groq = new Groq({
-    apiKey: process.env.GROQ_API_KEY,
+  apiKey: process.env.GROQ_API_KEY,
 });
 
 export async function POST(req: Request) {
-    try {
-        const { gameState, userInput } = await responseToJson(req);
+  try {
+    const { gameState, userInput } = await responseToJson(req);
 
-        const systemPrompt = \`
+    const systemPrompt = `
       ERES EL MASTER DE UNA MAZMORRA SATÍRICA Y LETAL.
       
       REGLAS DE ORO:
@@ -18,12 +18,12 @@ export async function POST(req: Request) {
       3. Usa el contexto del grupo para narrar las consecuencias.
       
       CONTEXTO DEL GRUPO:
-      \${gameState.players?.map((p: any) => \`- \${p.name} (\${p.race}): HP \${p.hp}/\${p.maxHp}\`).join('\\n') || '- Solo ' + gameState.character?.name}
+      ${gameState.players?.map((p: any) => `- ${p.name} (${p.race}): HP ${p.hp}/${p.maxHp}`).join('\n') || '- Solo ' + gameState.character?.name}
       
-      ENTORNO ACTUAL: \${gameState.currentRoom.name}
-      \${gameState.currentRoom.description}
+      ENTORNO ACTUAL: ${gameState.currentRoom.name}
+      ${gameState.currentRoom.description}
       
-      ACCION DEL JUGADOR (\${gameState.character?.name}): \${userInput}
+      ACCION DEL JUGADOR (${gameState.character?.name}): ${userInput}
       
       FILOSOFÍA DEL MASTER (MODO LETAL):
       - Si hay hostilidad, activa "inCombat": true.
@@ -38,7 +38,7 @@ export async function POST(req: Request) {
         "gameStatus": "playing",
         "inCombat": false
       }
-    \`;
+    `;
 
     const chatCompletion = await groq.chat.completions.create({
       messages: [
@@ -58,6 +58,6 @@ export async function POST(req: Request) {
 }
 
 async function responseToJson(req: Request) {
-    const body = await req.json();
-    return body;
+  const body = await req.json();
+  return body;
 }
