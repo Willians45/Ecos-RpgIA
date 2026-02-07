@@ -26,6 +26,7 @@ export function processTurn(currentState: GameState, actions: Action[]): ActionR
     let newState = JSON.parse(JSON.stringify(currentState)); // Copia profunda
     const events: GameEvent[] = [];
     const narrativeSeeds: string[] = [];
+    const currentRoom = INITIAL_ROOMS[newState.currentRoomId];
 
     // Procesar acciones secuencialmente (por ahora, luego se podría hacer por iniciativa)
     for (const action of actions) {
@@ -33,7 +34,7 @@ export function processTurn(currentState: GameState, actions: Action[]): ActionR
         if (!player || player.hp <= 0) continue; // Muertos no actúan
 
         const input = action.content.toLowerCase();
-        const currentRoom = INITIAL_ROOMS[newState.currentRoomId];
+        const currentRoom = INITIAL_ROOMS[newState.currentRoomId]; // This one is kept as it correctly reflects the room for the current action
 
         // --- LÓGICA DE COMBATE BÁSICA ---
         if (input.includes('atacar') || input.includes('golpear') || input.includes('matar')) {
@@ -139,7 +140,7 @@ export function processTurn(currentState: GameState, actions: Action[]): ActionR
     // --- TURNO DE LOS ENEMIGOS (IA PRIMITIVA) ---
     // Solo atacan si hay combate activo
     if (newState.inCombat) {
-        const currentRoom = INITIAL_ROOMS[newState.currentRoomId];
+        const currentRoom = INITIAL_ROOMS[newState.currentRoomId]; // This declaration is now the correct one for enemy turn
         const enemies = currentRoom.entities.filter((e: any) =>
             e.isEnemy && (!e.missingFlag || !newState.worldState[e.missingFlag]) && (e.hp || 0) > 0
         );
