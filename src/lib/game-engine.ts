@@ -26,7 +26,6 @@ export function processTurn(currentState: GameState, actions: Action[]): ActionR
     let newState = JSON.parse(JSON.stringify(currentState)); // Copia profunda
     const events: GameEvent[] = [];
     const narrativeSeeds: string[] = [];
-    const currentRoom = INITIAL_ROOMS[newState.currentRoomId];
 
     // Procesar acciones secuencialmente (por ahora, luego se podría hacer por iniciativa)
     for (const action of actions) {
@@ -182,6 +181,7 @@ export function processTurn(currentState: GameState, actions: Action[]): ActionR
     // --- VERIFICACIÓN DE FIN DE COMBATE ---
     // Si estábamos en combate, verificar si quedan enemigos vivos en la sala
     if (newState.inCombat) {
+        const currentRoom = INITIAL_ROOMS[newState.currentRoomId];
         const remainingEnemies = currentRoom.entities.some((e: any) =>
             e.isEnemy && (!e.missingFlag || !newState.worldState[e.missingFlag]) && (e.hp || 0) > 0
         );
