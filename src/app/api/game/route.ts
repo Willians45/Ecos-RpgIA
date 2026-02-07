@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { Groq } from 'groq-sdk';
-import { processTurn } from '@/lib/game-engine';
+import { processTurn, Action } from '@/lib/game-engine';
 import { INITIAL_ROOMS } from '@/lib/game-data';
 
 export async function POST(req: Request) {
@@ -57,8 +57,22 @@ export async function POST(req: Request) {
       RESPONDE SOLO CON LA NARRATIVA. SIN METADATOS NI NOTAS.
     `;
 
+
+    // Construir mensajes con historial + instrucción actual
+    const messages = [
+      { role: 'system' as const, content: systemPrompt },
+      ...newState.history.map((msg: any) => ({
+        role: msg.role as 'user' | 'assistant' | 'system',
+        content: msg.content
+      })),
+      {
+        role: 'user' as const,
+        content: `Acciones del turno actual:\n${actions.map((a: Action) => `- ${a.playerName}: ${a.content}`).join('\n')}\n\nDescribe lo que pasa según el motor: ${engineNarrative}`
+      }
+    ];
+
     const chatCompletion = await groq.chat.completions.create({
-      messages: [{ role: 'system', content: systemPrompt }],
+      messages,
       model: 'llama-3.3-70b-versatile',
       temperature: 0.7,
     });
