@@ -6,89 +6,65 @@ export async function POST(req: Request) {
     const apiKey = process.env.GROQ_API_KEY;
 
     if (!apiKey) {
-      console.error("ERROR: GROQ_API_KEY no configurada en el servidor.");
-      return NextResponse.json({
-        narrative: "El Master ha perdido su voz mística (Falta la API Key en el servidor)."
-      }, { status: 500 });
+      console.error("ERROR: GROQ_API_KEY no configurada.");
+      return NextResponse.json({ narrative: "El Master está mudo." }, { status: 500 });
     }
 
     const groq = new Groq({ apiKey });
-    const { gameState, userInput } = await req.json();
+    const { gameState, actions } = await req.json();
 
-    if (!gameState || !userInput) {
-      return NextResponse.json({
-        narrative: "Tus pensamientos están fragmentados. (Faltan datos en la petición)."
-      }, { status: 400 });
+    if (!gameState || !actions || !Array.isArray(actions)) {
+      return NextResponse.json({ narrative: "Caos en la comunicación mística." }, { status: 400 });
     }
 
     const systemPrompt = `
-      ERES EL MASTER DE UNA MAZMORRA SATÍRICA Y LETAL.
+      ERES EL MASTER DE UNA MAZMORRA SATÍRICA, LETAL Y ULTRA-REALISTA.
       
-      PERSONALIDAD DEL MASTER:
-      - Eres un narrador crudo, oscuro y con humor negro. No ayudes al jugador.
-      - Si el jugador hace algo estúpido, sé cruel. La letalidad es tu marca.
+      MISIÓN:
+      Recibes las acciones de un GRUPO de jugadores. Debes resolverlas SIMULTÁNEAMENTE en un solo relato crudo y oscuro.
+      
+      REGLAS DE RIGOR (DIFICULTAD LETAL++):
+      1. REALISMO FÍSICO: Un empujón no mata. Un golpe de espada en el pecho sí. El entorno es peligroso.
+      2. TIRADAS EXIGENTES: El éxito depende de los atributos. Ignora la suerte fácil. Si intentan algo tonto, CASTÍGALOS.
+      3. DIALECTO FIEL: Los orcos deben hablar como orcos ("TU SER BASURA", "YO ROMPER HUESOS"). 
+      4. NARRATIVA COLECTIVA: Enlaza las acciones de todos los jugadores. Si A empuja y B ataca, narra cómo esas dos cosas ocurren a la vez.
 
-      CONTEXTO MULTIJUGADOR (GRUPO):
-      - Estás dirigiendo a un GRUPO de aventureros. Usa plurales cuando hables de sus acciones generales ("Hacéis", "Camináis", "El grupo se detiene").
-      - IDENTIFICA OBJETIVOS: Si una acción provoca daño o da un objeto, debes elegir a un objetivo específico (generalmente quien actuó, pero podrías golpear a otro por "error" o daño de área).
-      - RECONOCE A LOS COMPAÑEROS: Menciona qué hacen los demás mientras el jugador actual actúa. No los ignores.
+      LISTA DE JUGADORES Y SUS ATRIBUTOS:
+      ${gameState.players?.map((p: any) => `- ID: ${p.id}, Nombre: ${p.name}, Atributos: ${JSON.stringify(p.attributes)}, HP: ${p.hp}/${p.maxHp}`).join('\n')}
 
-      LISTA DE JUGADORES (CONTEXTO):
-      ${gameState.players?.map((p: any) => `- ID: ${p.id}, Nombre: ${p.name}, Raza: ${p.race}, HP: ${p.hp}/${p.maxHp}`).join('\n') || '- Solo ' + gameState.character?.name}
-      
-      ENTORNO ACTUAL: ${gameState.currentRoom?.name || 'Lugar Desconocido'}
-      ${gameState.currentRoom?.description || 'Oscuridad total.'}
-      ENTIDADES: ${gameState.currentRoom?.entities?.map((e: any) => `${e.name} (${e.race})`).join(', ') || 'Ninguna'}
-      
-      ESTADO MENTAL ORCO (Si hay orcos):
-      - Brutos, agresivos, hablan como: "YO MACHACAR", "TU TENER COSA BRILLANTE". No caen en bromas infantiles.
+      ENTORNO ACTUAL: ${gameState.currentRoom?.name}
+      ${gameState.currentRoom?.description}
+      ENTIDADES: ${gameState.currentRoom?.entities?.map((e: any) => `${e.name} (${e.race})`).join(', ')}
 
-      ACCION REALIZADA POR (${gameState.character?.name}, ID: ${gameState.character?.id}): ${userInput}
+      ACCIONES DEL TURNO ACTUAL:
+      ${actions.map(a => `- ${a.playerName} (ID: ${a.playerId}): "${a.content}"`).join('\n')}
       
-      Responde ESTRICTAMENTE en JSON:
+      RESPONDE EN JSON ESTRICTO:
       {
-        "narrative": "Respuesta grupal mencionando a los presentes y los diálogos NPCs",
-        "targetPlayerId": "ID del jugador afectado específicamente (null si afecta a todos o a ninguno)",
+        "narrative": "Relato que resuelve TODAS las acciones del grupo con rigor y consecuencias.",
+        "targetPlayerId": "ID del jugador que sufre el mayor cambio (daño/item), puede ser null si no hay un blanco único",
         "hpDelta": 0,
         "itemGained": null,
-        "nextRoomId": null,
-        "gameStatus": "playing",
-        "inCombat": false
+        "nextRoomId": "ID de la siguiente sala si el grupo avanza (null si siguen aquí)",
+        "inCombat": false,
+        "gameStatus": "playing"
       }
     `;
 
     const chatCompletion = await groq.chat.completions.create({
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userInput },
-      ],
+      messages: [{ role: 'system', content: systemPrompt }],
       model: 'llama-3.3-70b-versatile',
       response_format: { type: 'json_object' },
-      temperature: 0.8,
+      temperature: 0.65, // Un poco más bajo para ser más consistente y riguroso
     });
 
     const responseContent = chatCompletion.choices[0].message.content;
+    if (!responseContent) throw new Error("IA vacía.");
 
-    if (!responseContent) {
-      throw new Error("La IA devolvió una respuesta vacía.");
-    }
-
-    const parsedResponse = JSON.parse(responseContent);
-
-    // Si la IA no envía targetPlayerId, por defecto es quien realizó la acción
-    if (parsedResponse.hpDelta !== 0 || parsedResponse.itemGained) {
-      if (!parsedResponse.targetPlayerId) {
-        parsedResponse.targetPlayerId = gameState.character?.id;
-      }
-    }
-
-    return NextResponse.json(parsedResponse);
+    return NextResponse.json(JSON.parse(responseContent));
 
   } catch (error: any) {
-    console.error("DETALLE DEL ERROR EN API/GAME:", error);
-    return NextResponse.json({
-      narrative: `El abismo consume tus palabras... (Error: ${error.message || 'Desconocido'})`,
-      debug: error.toString()
-    }, { status: 500 });
+    console.error("ERROR API:", error);
+    return NextResponse.json({ narrative: `El abismo parpadea... ${error.message}` }, { status: 500 });
   }
 }
