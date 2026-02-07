@@ -54,6 +54,7 @@ export function processTurn(currentState: GameState, actions: Action[]): ActionR
                     const damage = Math.max(1, Math.floor(player.attributes.fuerza / 2) + rollDice(4));
                     target.hp = (target.hp || 0) - damage;
 
+                    newState.inCombat = true; // Entrar en combate al atacar
                     narrativeSeeds.push(`${player.name} ataca a ${target.name} y ACIERTA (Roll ${roll}+${player.attributes.fuerza}). Daño: ${damage}. HP Restante: ${target.hp}.`);
 
                     if (target.hp <= 0) {
@@ -63,6 +64,7 @@ export function processTurn(currentState: GameState, actions: Action[]): ActionR
                     }
                 } else {
                     // Fallo
+                    newState.inCombat = true; // Entrar en combate aunque falles
                     narrativeSeeds.push(`${player.name} ataca a ${target.name} pero FALLA (Roll ${roll}+${player.attributes.fuerza}).`);
                 }
             } else {
@@ -167,6 +169,20 @@ export function processTurn(currentState: GameState, actions: Action[]): ActionR
             } else {
                 narrativeSeeds.push(`EL ENEMIGO ${enemy.name} lanza un golpe a ${targetPlayer.name} pero FALLA.`);
             }
+        }
+    }
+
+    // --- VERIFICACIÓN DE FIN DE COMBATE ---
+    // Si estábamos en combate, verificar si quedan enemigos vivos en la sala
+    if (newState.inCombat) {
+        const remainingEnemies = currentRoom.entities.some((e: any) =>
+            e.isEnemy && (!e.missingFlag || !newState.worldState[e.missingFlag]) && (e.hp || 0) > 0
+        );
+
+        if (!remainingEnemies) {
+            newState.inCombat = false;
+            events.push({ type: 'info', description: 'Combate finalizado' });
+            narrativeSeeds.push(`El silencio vuelve a la sala. La amenaza ha sido neutralizada.`);
         }
     }
 
