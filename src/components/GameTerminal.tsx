@@ -25,7 +25,7 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
     useEffect(() => {
         if (!state.roomId) return;
 
-        const channel = supabase.channel(`room-\${state.roomId}`, {
+        const channel = supabase.channel(`room-${state.roomId}`, {
             config: {
                 broadcast: { self: true },
             },
@@ -159,7 +159,7 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
                         <div className="w-full bg-gray-900 h-1.5 rounded-sm overflow-hidden border border-white/5">
                             <div
                                 className="h-full bg-gradient-to-r from-rose-700 to-rose-500 transition-all duration-500"
-                                style={{ width: `\${(state.character.hp / state.character.maxHp) * 100}%` }}
+                                style={{ width: `${(state.character.hp / state.character.maxHp) * 100}%` }}
                             />
                         </div>
                     </div>
