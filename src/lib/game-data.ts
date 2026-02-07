@@ -86,6 +86,7 @@ export interface GameState {
     content: string;
     playerName?: string;
   }[];
+  inCombat: boolean;
   isGameOver: boolean;
   gameStatus: 'playing' | 'victory' | 'death';
 }
