@@ -149,7 +149,7 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
                         if (data.narrative && state.roomId) {
                             await supabase.channel(`room-${state.roomId}`).send({
                                 type: 'broadcast',
-                                event: 'sync_world',
+                                event: 'turn_complete',
                                 payload: data
                             });
                         }
