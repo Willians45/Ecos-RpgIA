@@ -139,10 +139,11 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
 
     // Lógica para procesar el turno
     useEffect(() => {
+        let timeout: NodeJS.Timeout;
+
         const runTurn = async () => {
             const allReady = onlinePlayers.length > 0 && pendingActions.length >= onlinePlayers.length;
 
-            // Bloqueo de entrada para evitar re-ejecuciones
             if (allReady && !isProcessing.current && !isTyping) {
                 const sortedPlayers = [...onlinePlayers].sort((a, b) => a.id.localeCompare(b.id));
                 const isLeader = sortedPlayers[0].id === state.character?.id;
@@ -151,26 +152,35 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
                     isProcessing.current = true;
                     setIsTyping(true);
 
+                    // Timer de seguridad: 15 segundos máx
+                    timeout = setTimeout(() => {
+                        console.warn("--- TIMEOUT DE SEGURIDAD ALCANZADO ---");
+                        setIsTyping(false);
+                        isProcessing.current = false;
+                        setPendingActions([]);
+                        setHasSentAction(false);
+                    }, 15000);
+
                     try {
                         console.log("--- INICIANDO TURNO (LÍDER) ---");
                         const response = await fetch('/api/game', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
-                                gameState: state, // Aquí usamos el estado actual
+                                gameState: state,
                                 actions: pendingActions
                             })
                         });
 
                         const data = await response.json();
+                        clearTimeout(timeout);
 
                         if (data.error) {
                             console.error("Error de la API:", data.error);
                             setIsTyping(false);
-                            setPendingActions([]); // Resetear aunque falle para desbloquear
+                            setPendingActions([]);
                             setHasSentAction(false);
                         } else if (state.roomId) {
-                            console.log("Turno procesado con éxito. Notificando a otros...");
                             if (channelRef.current) {
                                 await channelRef.current.send({
                                     type: 'broadcast',
@@ -182,6 +192,7 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
                         }
                     } catch (error) {
                         console.error("Fallo crítico en turno:", error);
+                        clearTimeout(timeout);
                         setIsTyping(false);
                         setPendingActions([]);
                         setHasSentAction(false);
@@ -189,13 +200,13 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
                         isProcessing.current = false;
                     }
                 } else {
-                    console.log("--- ESPERANDO TURNO (SEGUIDOR) ---");
                     setIsTyping(true);
                 }
             }
         };
 
         runTurn();
+        return () => clearTimeout(timeout);
     }, [pendingActions.length, onlinePlayers.length, isTyping, state.roomId, applyTurnResult, state]);
     // Añadimos 'state' a las dependencias para evitar cierres obsoletos (stale closures)
 
@@ -288,10 +299,26 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
                             ))}
                         </div>
                         <div className="flex flex-col">
-                            <span className="text-[9px] text-gray-400 uppercase tracking-[0.2em] font-bold">
-                                {pendingActions.length >= onlinePlayers.length && onlinePlayers.length > 0
-                                    ? "PROCESANDO RELATO..."
-                                    : `ESPERANDO TURNOS (${pendingActions.length}/${onlinePlayers.length})`}
+                            <span className="text-[9px] text-gray-400 uppercase tracking-[0.2em] font-bold flex items-center gap-2">
+                                {pendingActions.length >= onlinePlayers.length && onlinePlayers.length > 0 ? (
+                                    <>
+                                        PROCESANDO RELATO...
+                                        <button
+                                            onClick={() => {
+                                                console.log("Reseteo manual solicitado");
+                                                setPendingActions([]);
+                                                setIsTyping(false);
+                                                setHasSentAction(false);
+                                                isProcessing.current = false;
+                                            }}
+                                            className="text-[7px] bg-rose-950 text-rose-500 px-1 border border-rose-500/30 hover:bg-rose-900 transition-colors"
+                                        >
+                                            [FORZAR RESETEO]
+                                        </button>
+                                    </>
+                                ) : (
+                                    `ESPERANDO TURNOS (${pendingActions.length}/${onlinePlayers.length})`
+                                )}
                             </span>
                             <span className="text-[8px] text-purple-500 font-mono tracking-widest">{currentRoom.name.toUpperCase()}</span>
                         </div>
