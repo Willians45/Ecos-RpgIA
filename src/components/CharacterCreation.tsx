@@ -29,8 +29,8 @@ export default function CharacterCreation({ onComplete }: CharacterCreationProps
             race: selectedRace,
             attributes,
             inventory: [],
-            hp: 100,
-            maxHp: 100
+            hp: 25,
+            maxHp: 25
         });
     };
 

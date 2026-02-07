@@ -137,37 +137,43 @@ export function processTurn(currentState: GameState, actions: Action[]): ActionR
     }
 
     // --- TURNO DE LOS ENEMIGOS (IA PRIMITIVA) ---
-    const currentRoom = INITIAL_ROOMS[newState.currentRoomId];
-    const enemies = currentRoom.entities.filter((e: any) =>
-        e.isEnemy && (!e.missingFlag || !newState.worldState[e.missingFlag]) && (e.hp || 0) > 0
-    );
+    // Solo atacan si hay combate activo
+    if (newState.inCombat) {
+        const currentRoom = INITIAL_ROOMS[newState.currentRoomId];
+        const enemies = currentRoom.entities.filter((e: any) =>
+            e.isEnemy && (!e.missingFlag || !newState.worldState[e.missingFlag]) && (e.hp || 0) > 0
+        );
 
-    for (const enemy of enemies) {
-        if (!enemy.damage) continue;
+        for (const enemy of enemies) {
+            if (!enemy.damage) continue;
 
-        // Elegir objetivo aleatorio vivo
-        const livingPlayers = newState.players.filter((p: Player) => p.hp > 0);
-        if (livingPlayers.length > 0) {
-            const targetPlayer = livingPlayers[Math.floor(Math.random() * livingPlayers.length)];
+            // Elegir objetivo aleatorio vivo
+            const livingPlayers = newState.players.filter((p: Player) => p.hp > 0);
 
-            // Tirada de ataque enemigo
-            const roll = rollDice(20);
-            if (roll >= 10) { // AC base del jugador
-                const dmg = rollDice(enemy.damage); // Daño variable
-                targetPlayer.hp = Math.max(0, targetPlayer.hp - dmg);
-                events.push({ type: 'damage', targetId: targetPlayer.id, value: dmg, description: `${enemy.name} golpea a ${targetPlayer.name}` });
-                narrativeSeeds.push(`EL ENEMIGO ${enemy.name} ATACA a ${targetPlayer.name} y ACIERTA haciendo ${dmg} de daño.`);
+            if (livingPlayers.length > 0) {
+                const targetPlayer = livingPlayers[Math.floor(Math.random() * livingPlayers.length)];
 
-                if (targetPlayer.hp <= 0) {
-                    narrativeSeeds.push(`${targetPlayer.name} ha caído INCONSCIENTE.`);
-                    // Check game over si todos mueren
-                    if (newState.players.every((p: Player) => p.hp <= 0)) {
-                        newState.isGameOver = true;
-                        newState.gameStatus = 'death';
+                // Tirada de ataque enemigo (Simplificada: 50% chance base + daño masivo)
+                // Ojo: Si el orco tiene +4 al hit, y player AC es 12. 
+                // Roll 1d20. Si (roll + 4) >= 12 -> Hit. (Roll >= 8). 65% hit rate.
+                const roll = rollDice(20);
+                if (roll >= 8) {
+                    const dmg = rollDice(enemy.damage); // Daño 1d6 (letalidad moderada)
+                    targetPlayer.hp = Math.max(0, targetPlayer.hp - dmg);
+                    events.push({ type: 'damage', targetId: targetPlayer.id, value: dmg, description: `${enemy.name} golpea a ${targetPlayer.name}` });
+                    narrativeSeeds.push(`EL ENEMIGO ${enemy.name} ATACA a ${targetPlayer.name} y ACIERTA haciendo ${dmg} de daño.`);
+
+                    if (targetPlayer.hp <= 0) {
+                        narrativeSeeds.push(`${targetPlayer.name} ha caído INCONSCIENTE.`);
+                        // Check game over
+                        if (newState.players.every((p: Player) => p.hp <= 0)) {
+                            newState.isGameOver = true;
+                            newState.gameStatus = 'death';
+                        }
                     }
+                } else {
+                    narrativeSeeds.push(`EL ENEMIGO ${enemy.name} lanza un golpe a ${targetPlayer.name} pero FALLA.`);
                 }
-            } else {
-                narrativeSeeds.push(`EL ENEMIGO ${enemy.name} lanza un golpe a ${targetPlayer.name} pero FALLA.`);
             }
         }
     }

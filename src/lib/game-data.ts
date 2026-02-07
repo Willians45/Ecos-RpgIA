@@ -142,7 +142,7 @@ export const INITIAL_ROOMS: Record<string, Room> = {
         race: 'Orco',
         hp: 20,
         maxHp: 20,
-        damage: 4,
+        damage: 6,
         isEnemy: true,
         missingFlag: 'guardia_muerto' // Desaparece si está muerto
       },
