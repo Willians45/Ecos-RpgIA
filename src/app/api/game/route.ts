@@ -87,30 +87,25 @@ export async function POST(req: Request) {
     });
 
     const aiNarrative = chatCompletion.choices[0].message.content || engineNarrative;
+    console.log("NARRATIVA GENERADA:", aiNarrative.substring(0, 50) + "...");
 
     // 3. RESPUESTA AL CLIENTE
-    // Mapeamos los eventos del motor a un formato que el frontend entienda
-    // NOTA: El frontend actual espera un solo 'targetPlayerId' para efectos simples.
-    // Para soportar múltiples daños/items en un turno, deberíamos refactorizar el frontend,
-    // pero por ahora, enviaremos el 'newState' completo y dejaremos que se sincronice.
-
-    // Extracción de datos clave para compatibilidad con frontend existente
     const primaryEvent = events.find(e => e.type === 'damage' || e.type === 'item_gain');
 
-    return NextResponse.json({
+    const responseData = {
       narrative: aiNarrative,
-      // Datos 'legacy' para animaciones simples en frontend
       targetPlayerId: primaryEvent?.targetId || null,
       hpDelta: primaryEvent?.type === 'damage' ? -primaryEvent.value : 0,
       itemGained: primaryEvent?.type === 'item_gain' ? primaryEvent.value : null,
+      newState: newState,
+      diceRolls: diceRolls
+    };
 
-      // DATOS HÍBRIDOS REALES (Source of Truth)
-      // Enviamos el estado completo calculado por el motor
-      newState: newState
-    });
+    console.log("ENVIANDO RESPUESTA EXITOSA AL CLIENTE");
+    return NextResponse.json(responseData);
 
   } catch (error: any) {
-    console.error("ERROR API:", error);
-    return NextResponse.json({ narrative: `Error crítico: ${error.message}` }, { status: 500 });
+    console.error("ERROR CRÍTICO EN API GAME:", error);
+    return NextResponse.json({ narrative: `Error crítico del sistema: ${error.message}`, error: error.message }, { status: 500 });
   }
 }

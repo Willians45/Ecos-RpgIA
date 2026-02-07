@@ -122,6 +122,12 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
                 Object.values(presenceState).forEach((presence: any) => {
                     if (presence[0]?.player) players.push(presence[0].player);
                 });
+
+                // Garantizar que yo estoy en la lista si no aparezco por delay de presencia
+                if (state.character && !players.some(p => p.id === state.character?.id)) {
+                    players.push(state.character);
+                }
+
                 console.log("Presencia sincronizada. Jugadores online:", players.length);
                 setOnlinePlayers(players);
             })
@@ -135,12 +141,10 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
             supabase.removeChannel(channel);
             channelRef.current = null;
         };
-    }, [state.roomId, state.character?.id, applyTurnResult]); // Quitamos 'state' para evitar re-suscripciones constantes
+    }, [state.roomId, state.character?.id, applyTurnResult]); // NO incluyas 'state' aquí
 
     // Lógica para procesar el turno
     useEffect(() => {
-        let timeout: NodeJS.Timeout;
-
         const runTurn = async () => {
             const allReady = onlinePlayers.length > 0 && pendingActions.length >= onlinePlayers.length;
 
@@ -149,65 +153,55 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
                 const isLeader = sortedPlayers[0].id === state.character?.id;
 
                 if (isLeader) {
+                    console.log("--- LÍDER INICIANDO TURNO ---");
                     isProcessing.current = true;
                     setIsTyping(true);
 
-                    // Timer de seguridad: 15 segundos máx
-                    timeout = setTimeout(() => {
-                        console.warn("--- TIMEOUT DE SEGURIDAD ALCANZADO ---");
-                        setIsTyping(false);
-                        isProcessing.current = false;
-                        setPendingActions([]);
-                        setHasSentAction(false);
-                    }, 15000);
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => {
+                        controller.abort();
+                        console.error("TIMEOUT API");
+                    }, 20000);
 
                     try {
-                        console.log("--- INICIANDO TURNO (LÍDER) ---");
                         const response = await fetch('/api/game', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                gameState: state,
-                                actions: pendingActions
-                            })
+                            body: JSON.stringify({ gameState: state, actions: pendingActions }),
+                            signal: controller.signal
                         });
 
                         const data = await response.json();
-                        clearTimeout(timeout);
+                        clearTimeout(timeoutId);
 
-                        if (data.error) {
-                            console.error("Error de la API:", data.error);
-                            setIsTyping(false);
-                            setPendingActions([]);
-                            setHasSentAction(false);
-                        } else if (state.roomId) {
-                            if (channelRef.current) {
-                                await channelRef.current.send({
-                                    type: 'broadcast',
-                                    event: 'turn_complete',
-                                    payload: data
-                                });
-                            }
+                        if (data.narrative && state.roomId && channelRef.current) {
+                            await channelRef.current.send({
+                                type: 'broadcast',
+                                event: 'turn_complete',
+                                payload: data
+                            });
                             applyTurnResult(data);
+                        } else {
+                            throw new Error(data.error || "Respuesta inválida");
                         }
-                    } catch (error) {
-                        console.error("Fallo crítico en turno:", error);
-                        clearTimeout(timeout);
-                        setIsTyping(false);
+                    } catch (error: any) {
+                        console.error("FALLO TURNO LÍDER:", error);
+                        clearTimeout(timeoutId);
                         setPendingActions([]);
                         setHasSentAction(false);
+                        setIsTyping(false);
                     } finally {
                         isProcessing.current = false;
                     }
                 } else {
+                    console.log("--- SEGUIDOR ESPERANDO ---");
                     setIsTyping(true);
                 }
             }
         };
 
         runTurn();
-        return () => clearTimeout(timeout);
-    }, [pendingActions.length, onlinePlayers.length, isTyping, state.roomId, applyTurnResult, state]);
+    }, [pendingActions, onlinePlayers, applyTurnResult, state]); // 'pendingActions' y 'onlinePlayers' como objetos completos
     // Añadimos 'state' a las dependencias para evitar cierres obsoletos (stale closures)
 
     const handleSubmit = async (e: React.FormEvent) => {
