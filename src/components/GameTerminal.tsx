@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { GameState, INITIAL_ROOMS, Room, Player } from '@/lib/game-data';
 import { cn } from '@/lib/utils';
 import { Send, Heart, Backpack, Users, Shield, Clock, CheckCircle2 } from 'lucide-react';
@@ -25,6 +25,47 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
     const [hasSentAction, setHasSentAction] = useState(false);
     const [lastDiceRolls, setLastDiceRolls] = useState<any[]>([]);
     const scrollRef = useRef<HTMLDivElement>(null);
+
+    // Función unificada para aplicar el resultado de un turno
+    const applyTurnResult = useCallback((payload: any) => {
+        if (!payload.newState) return;
+
+        setState(prev => {
+            if (!prev || !prev.character) return prev;
+            const serverState = payload.newState as GameState;
+
+            // Fusionar historial sin duplicados
+            const newHistory = [...prev.history];
+            serverState.history.forEach(msg => {
+                if (!newHistory.some(m => m.content === msg.content && m.role === msg.role)) {
+                    newHistory.push(msg);
+                }
+            });
+
+            if (payload.narrative && !newHistory.some(m => m.content === payload.narrative)) {
+                newHistory.push({ role: 'assistant', content: payload.narrative });
+            }
+
+            const myUpdatedChar = serverState.players.find(p => p.id === prev.character!.id);
+
+            return {
+                ...prev,
+                currentRoomId: serverState.currentRoomId,
+                worldState: serverState.worldState,
+                history: newHistory,
+                players: serverState.players,
+                character: myUpdatedChar || prev.character,
+                inCombat: serverState.inCombat,
+                gameStatus: serverState.gameStatus,
+                isGameOver: serverState.isGameOver
+            };
+        });
+
+        setPendingActions([]);
+        setHasSentAction(false);
+        setIsTyping(false);
+        if (payload.diceRolls) setLastDiceRolls(payload.diceRolls);
+    }, [setState]);
 
     // Derivar la sala actual del ID
     const currentRoom = INITIAL_ROOMS[state.currentRoomId] || INITIAL_ROOMS['start'];
@@ -66,46 +107,8 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
                     return [...prev, payload];
                 });
             })
-            .on('broadcast', { event: 'sync_world' }, ({ payload }) => {
-                // Sincronización completa con el estado del servidor
-                setState(prev => {
-                    if (!prev || !prev.character || !payload.newState) return prev;
-
-                    const serverState = payload.newState as GameState;
-
-                    // Fusionar historial sin duplicados
-                    const newHistory = [...prev.history];
-                    serverState.history.forEach(msg => {
-                        if (!newHistory.some(m => m.content === msg.content && m.role === msg.role)) {
-                            newHistory.push(msg);
-                        }
-                    });
-
-                    // Actualizar narrativa de la IA generada en este turno si no viene en el history del state
-                    if (payload.narrative && !newHistory.some(m => m.content === payload.narrative)) {
-                        newHistory.push({ role: 'assistant', content: payload.narrative });
-                    }
-
-                    // Encontrar mi personaje actualizado en el state del servidor
-                    const myUpdatedChar = serverState.players.find(p => p.id === prev.character!.id);
-
-                    return {
-                        ...prev,
-                        currentRoomId: serverState.currentRoomId,
-                        worldState: serverState.worldState,
-                        history: newHistory,
-                        players: serverState.players, // Sincronizar lista completa
-                        character: myUpdatedChar || prev.character, // Actualizar mi char local
-                        inCombat: false, // El motor decide, pero por defecto false tras turno
-                        gameStatus: serverState.gameStatus,
-                        isGameOver: serverState.isGameOver
-                    };
-                });
-
-                setPendingActions([]);
-                setHasSentAction(false);
-                setIsTyping(false);
-                if (payload.diceRolls) setLastDiceRolls(payload.diceRolls);
+            .on('broadcast', { event: 'turn_complete' }, ({ payload }) => {
+                applyTurnResult(payload);
             })
             .on('presence', { event: 'sync' }, () => {
                 const newState = channel.presenceState();
@@ -124,7 +127,7 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
             });
 
         return () => { supabase.removeChannel(channel); };
-    }, [state.roomId, state.character?.id, setState]);
+    }, [state.roomId, state.character?.id, setState, applyTurnResult]);
 
     // Lógica para procesar el turno
     useEffect(() => {
@@ -149,11 +152,14 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
                         const data = await response.json();
 
                         if (data.narrative && state.roomId) {
+                            // Primero aviso a los demás
                             await supabase.channel(`room-${state.roomId}`).send({
                                 type: 'broadcast',
                                 event: 'turn_complete',
                                 payload: data
                             });
+                            // Segundo muevo mi propio estado
+                            applyTurnResult(data);
                         }
                     } catch (error) {
                         console.error(error);
@@ -166,7 +172,7 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
         };
 
         processTurn();
-    }, [pendingActions.length, onlinePlayers.length]);
+    }, [pendingActions.length, onlinePlayers.length, isTyping, applyTurnResult, state.character?.id, state.roomId, state]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
