@@ -132,7 +132,8 @@ export function processTurn(currentState: GameState, actions: Action[]): ActionR
 
         // --- ACCIONES GENÉRICAS ---
         else {
-            narrativeSeeds.push(`${player.name} realiza: "${input}". (Sin efecto mecánico directo, el Master interpretará).`);
+            // Para acciones exploratorias/narrativas, dar contexto de sala
+            narrativeSeeds.push(`${player.name} realiza: "${input}". RECUERDA: Están en "${currentRoom.name}". Describe elementos de ESTA sala solamente.`);
         }
     }
 

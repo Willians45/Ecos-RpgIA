@@ -28,22 +28,33 @@ export async function POST(req: Request) {
     // La IA ahora actúa como "renderizador de texto". No decide qué pasa, solo lo cuenta bonito.
     const groq = new Groq({ apiKey });
 
+    // Información de la sala actual (CONTEXTO CRÍTICO)
+    const currentRoom = INITIAL_ROOMS[newState.currentRoomId];
+
     const systemPrompt = `
-      ERES EL NARRADOR DE UN JUEGO DE ROL.
+      ERES EL NARRADOR DE UN JUEGO DE ROL. Tu trabajo es describir lo que pasa SIN inventar nada.
       
-      INPUT DEL MOTOR DE JUEGO (HECHOS INMUTABLES):
-      ----------------------------------------------------
+      ═══════════════════════════════════════════════════════════════
+      LOCALIZACIÓN ACTUAL (NO PUEDES CAMBIAR ESTO):
+      ═══════════════════════════════════════════════════════════════
+      SALA: ${currentRoom.name}
+      DESCRIPCIÓN BASE: ${currentRoom.description}
+      
+      ═══════════════════════════════════════════════════════════════
+      LO QUE ACABA DE PASAR (MOTOR DE JUEGO):
+      ═══════════════════════════════════════════════════════════════
       ${engineNarrative}
-      ----------------------------------------------------
       
-      INSTRUCCIONES CLAVE:
-      1. NARRATIVA HÍBRIDA: Usa los hechos de arriba. NO INVENTES DAÑO NI MUERTES que no estén en el input.
-      2. ESTILO: Oscuro, cínico y BREVE. Evita la prosa excesivamente florida ("purple prose").
-      3. LONGITUD: Máximo 2-3 oraciones concisas por acción. NO escribas parrafadas.
-      4. SI NO PASA NADA NUEVO: Simplemente describe la atmósfera brevemente.
+      ═══════════════════════════════════════════════════════════════
+      INSTRUCCIONES ESTRICTAS:
+      ═══════════════════════════════════════════════════════════════
       
-      SI EL INPUT DICE "FALLA": Describe un error torpe o un bloqueo fácil. NO describas "casi muertes".
-      SI EL INPUT DICE "DAÑO 3": Si el jugador tiene 25 HP, es una herida seria. Si tiene 100, es un rasguño.
+      1. **LOCALIZACIÓN FIJA**: Estás en "${currentRoom.name}". NO inventes callejones, bosques ni otras salas.
+      2. **SOLO DESCRIBE LOS HECHOS**: El motor te dice qué pasó. Tú solo narras cómo se sintió o se vio.
+      3. **BREVEDAD OBLIGATORIA**: Máximo 2-3 oraciones. Nada de párrafos épicos.
+      4. **SI NO PASÓ NADA**: Describe solo lo que el jugador ve EN ESTA SALA (usa la descripción base de arriba).
+      
+      RESPONDE SOLO CON LA NARRATIVA. SIN METADATOS NI NOTAS.
     `;
 
     const chatCompletion = await groq.chat.completions.create({
