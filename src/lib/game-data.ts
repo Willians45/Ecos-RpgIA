@@ -76,68 +76,130 @@ export interface Player {
 }
 
 export interface GameState {
-  roomId: string | null;
+  roomId: string | null; // ID de la sala de Supabase (lobby)
   players: Player[];
   character: Player | null; // El jugador local
-  currentRoom: Room;
+  currentRoomId: string; // ID de la sala lógica del juego (start, hallway)
+  worldState: Record<string, boolean>; // Flags globales: 'guardia_muerto', 'puerta_abierta'
   history: {
     role: 'user' | 'assistant' | 'system';
     content: string;
     playerName?: string;
   }[];
-  inCombat: boolean;
   isGameOver: boolean;
   gameStatus: 'playing' | 'victory' | 'death';
+}
+
+export interface RoomEntity {
+  id: string;
+  name: string;
+  description: string;
+  race?: string;
+  hp?: number; // Si tiene HP, es combatible
+  maxHp?: number;
+  damage?: number; // Daño base que hace
+  isEnemy?: boolean;
+  requiredFlag?: string; // Solo aparece si esta flag es TRUE
+  missingFlag?: string; // Solo aparece si esta flag es FALSE (ej. si guardia_muerto es true, el guardia vivo desaparece)
+}
+
+export interface RoomItem {
+  id: string;
+  name: string;
+  description: string;
+  isTakeable: boolean;
+  requiredFlag?: string;
+  missingFlag?: string; // Si 'candelabro_tomado' es true, el item desaparece
+}
+
+export interface RoomExit {
+  direction: string;
+  targetRoomId: string;
+  condition?: string; // Flag requerida para usar la salida (ej: 'puerta_abierta')
+  lockedMessage?: string; // Mensaje si está bloqueada
 }
 
 export interface Room {
   id: string;
   name: string;
   description: string;
-  variables: Record<string, any>;
-  entities: { name: string; description: string; race: string }[];
-  exits: { direction: string; targetRoomId: string; condition?: string }[];
-  goal?: string; // Objetivo para que la IA sepa cuándo cerrar la escena
+  entities: RoomEntity[];
+  items: RoomItem[];
+  exits: RoomExit[];
 }
 
-export const INITIAL_ROOMS: Room[] = [
-  {
+export const INITIAL_ROOMS: Record<string, Room> = {
+  'start': {
     id: 'start',
     name: 'La Celda de los Lamentos',
-    description: 'Te despiertas en una celda húmeda. El olor a moho es insoportable. Un candelabro de hierro cuelga peligrosamente del techo. A través de los barrotes, ves a un guardia que parece estar quedándose dormido.',
-    goal: 'Escapar de la celda (abrir la puerta o doblar los barrotes).',
-    variables: {
-      candelabro_estado: 'flojo',
-      guardia_estado: 'dormitando',
-      puerta_cerrada: true
-    },
+    description: 'Te despiertas en una celda húmeda. El olor a moho es insoportable. Un candelabro de hierro cuelga peligrosamente del techo.',
     entities: [
-      { name: 'Guardia Orco', description: 'Un orco corpulento con una armadura de cuero remendada y una espada corta en el cinto. Apesta a grog barato.', race: 'Orco' }
+      {
+        id: 'guardia_orco',
+        name: 'Guardia Orco',
+        description: 'Un orco corpulento con una armadura de cuero remendada. Parece aburrido pero peligroso.',
+        race: 'Orco',
+        hp: 20,
+        maxHp: 20,
+        damage: 4,
+        isEnemy: true,
+        missingFlag: 'guardia_muerto' // Desaparece si está muerto
+      },
+      {
+        id: 'cadaver_guardia',
+        name: 'Cuerpo del Guardia Orco',
+        description: 'El cuerpo sin vida del orco yace en el suelo, soltando un charco de sangre oscura.',
+        requiredFlag: 'guardia_muerto' // Aparece solo si el guardia murió
+      }
+    ],
+    items: [
+      {
+        id: 'candelabro',
+        name: 'Candelabro Oxidado',
+        description: 'Viejo, pesado y con bordes afilados. Podría servir como arma.',
+        isTakeable: true,
+        missingFlag: 'candelabro_tomado'
+      },
+      {
+        id: 'llave_celda',
+        name: 'Llave de la Celda',
+        description: 'Una llave tosca de hierro. Estaba en el cinto del guardia.',
+        isTakeable: true,
+        requiredFlag: 'guardia_muerto', // Solo accesible si matas al guardia (o se la robas con skill check, lógica futura)
+        missingFlag: 'llave_tomada'
+      }
     ],
     exits: [
-      { direction: 'Norte', targetRoomId: 'hallway', condition: 'puerta_abierta' }
+      {
+        direction: 'Norte',
+        targetRoomId: 'hallway',
+        condition: 'puerta_celda_abierta',
+        lockedMessage: 'La puerta de la celda está cerrada. Necesitas abrirla o romperla.'
+      }
     ]
   },
-  {
+  'hallway': {
     id: 'hallway',
     name: 'Pasillo de la Vigilancia',
-    description: 'Un pasillo angosto custodiado por un pesado portón de hierro al final. Este es el portón principal de la cárcel.',
-    goal: 'Cruzar el portón principal para salir al exterior.',
-    variables: {
-      porton_cerrado: true
-    },
+    description: 'Un pasillo angosto de piedra. Antorchas parpadean en las paredes.',
     entities: [],
+    items: [],
     exits: [
       { direction: 'Sur', targetRoomId: 'start' },
-      { direction: 'Exterior', targetRoomId: 'victory_room', condition: 'porton_abierto' }
+      {
+        direction: 'Exterior',
+        targetRoomId: 'victory_room',
+        condition: 'porton_principal_abierto',
+        lockedMessage: 'El gran portón de hierro está cerrado a cal y canto.'
+      }
     ]
   },
-  {
+  'victory_room': {
     id: 'victory_room',
-    name: 'La Salida de la Libertad',
-    description: 'El aire del exterior golpea tu rostro. Has escapado de la cárcel. Los Ecos de la Mazmorra se pierden a tus espaldas.',
-    variables: {},
+    name: 'Libertad',
+    description: 'El aire fresco de la noche te golpea. Eres libre.',
     entities: [],
+    items: [],
     exits: []
   }
-];
+};

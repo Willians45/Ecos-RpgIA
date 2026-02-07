@@ -25,6 +25,9 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
     const [hasSentAction, setHasSentAction] = useState(false);
     const scrollRef = useRef<HTMLDivElement>(null);
 
+    // Derivar la sala actual del ID
+    const currentRoom = INITIAL_ROOMS[state.currentRoomId] || INITIAL_ROOMS['start'];
+
     useEffect(() => {
         if (scrollRef.current) {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -56,7 +59,6 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
                 });
             })
             .on('broadcast', { event: 'player_action' }, ({ payload }) => {
-                // Alguien envió una acción, la guardamos en la cola de turnos
                 setPendingActions(prev => {
                     const alreadyIn = prev.some(a => a.playerId === payload.playerId);
                     if (alreadyIn) return prev;
@@ -64,45 +66,41 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
                 });
             })
             .on('broadcast', { event: 'sync_world' }, ({ payload }) => {
+                // Sincronización completa con el estado del servidor
                 setState(prev => {
-                    if (!prev || !prev.character) return prev;
+                    if (!prev || !prev.character || !payload.newState) return prev;
 
+                    const serverState = payload.newState as GameState;
+
+                    // Fusionar historial sin duplicados
                     const newHistory = [...prev.history];
-                    // Evitar duplicados de narrativa del Master
-                    if (!newHistory.some(m => m.content === payload.narrative)) {
+                    serverState.history.forEach(msg => {
+                        if (!newHistory.some(m => m.content === msg.content && m.role === msg.role)) {
+                            newHistory.push(msg);
+                        }
+                    });
+
+                    // Actualizar narrativa de la IA generada en este turno si no viene en el history del state
+                    if (payload.narrative && !newHistory.some(m => m.content === payload.narrative)) {
                         newHistory.push({ role: 'assistant', content: payload.narrative });
                     }
 
-                    let nextRoom = prev.currentRoom;
-                    if (payload.nextRoomId) {
-                        const room = INITIAL_ROOMS.find((r: Room) => r.id === payload.nextRoomId);
-                        if (room) nextRoom = room;
-                    }
-
-                    const isTarget = prev.character.id === payload.targetPlayerId;
-                    const updatedCharacter = { ...prev.character };
-
-                    if (isTarget) {
-                        if (payload.hpDelta) {
-                            updatedCharacter.hp = Math.max(0, updatedCharacter.hp + payload.hpDelta);
-                        }
-                        if (payload.itemGained && !updatedCharacter.inventory.includes(payload.itemGained)) {
-                            updatedCharacter.inventory = [...updatedCharacter.inventory, payload.itemGained];
-                        }
-                    }
+                    // Encontrar mi personaje actualizado en el state del servidor
+                    const myUpdatedChar = serverState.players.find(p => p.id === prev.character!.id);
 
                     return {
                         ...prev,
+                        currentRoomId: serverState.currentRoomId,
+                        worldState: serverState.worldState,
                         history: newHistory,
-                        currentRoom: nextRoom,
-                        character: updatedCharacter,
-                        inCombat: payload.inCombat !== undefined ? payload.inCombat : prev.inCombat,
-                        gameStatus: payload.gameStatus || prev.gameStatus,
-                        isGameOver: payload.gameStatus === 'victory' || payload.gameStatus === 'death'
+                        players: serverState.players, // Sincronizar lista completa
+                        character: myUpdatedChar || prev.character, // Actualizar mi char local
+                        inCombat: false, // El motor decide, pero por defecto false tras turno
+                        gameStatus: serverState.gameStatus,
+                        isGameOver: serverState.isGameOver
                     };
                 });
 
-                // Limpiar cola de acciones tras el procesamiento del Master
                 setPendingActions([]);
                 setHasSentAction(false);
                 setIsTyping(false);
@@ -114,7 +112,8 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
                     if (presence[0]?.player) players.push(presence[0].player);
                 });
                 setOnlinePlayers(players);
-                setState(prev => prev ? ({ ...prev, players }) : null);
+                // No actualizamos state.players aquí para no sobreescribir datos de combate del motor
+                // Solo usamos presence para la lista visual de "quién está online"
             })
             .subscribe(async (status) => {
                 if (status === 'SUBSCRIBED') {
@@ -125,11 +124,11 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
         return () => { supabase.removeChannel(channel); };
     }, [state.roomId, state.character?.id, setState]);
 
-    // Lógica para procesar el turno cuando todos han hablado
+    // Lógica para procesar el turno
     useEffect(() => {
         const processTurn = async () => {
-            if (onlinePlayers.length > 0 && pendingActions.length === onlinePlayers.length && !isTyping) {
-                // Solo un jugador (el que tenga el ID más bajo) dispara la API para evitar peticiones múltiples
+            // Procesar si hay jugadores online y todos han enviado acción
+            if (onlinePlayers.length > 0 && pendingActions.length >= onlinePlayers.length && !isTyping) {
                 const sortedPlayers = [...onlinePlayers].sort((a, b) => a.id.localeCompare(b.id));
                 const isLeader = sortedPlayers[0].id === state.character?.id;
 
@@ -141,7 +140,7 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
                                 gameState: state,
-                                actions: pendingActions // Enviamos todas las acciones del grupo
+                                actions: pendingActions
                             })
                         });
 
@@ -159,7 +158,6 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
                         setIsTyping(false);
                     }
                 } else {
-                    // Los demás solo ven que el Master está procesando
                     setIsTyping(true);
                 }
             }
@@ -178,8 +176,6 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
             content: input.trim()
         };
 
-        // 1. Mostrar localmente mi intención (opcional, pero mejor esperar al Master)
-        // 2. Broadcast de mi acción a todos los demás
         if (state.roomId) {
             await supabase.channel(`room-${state.roomId}`).send({
                 type: 'broadcast',
@@ -188,6 +184,8 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
             });
         }
 
+        // Optimista: me añado a mi lista local de pendientes
+        setPendingActions(prev => [...prev, userAction]);
         setHasSentAction(true);
         setInput('');
     };
@@ -203,6 +201,8 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
                         <h2 className="text-lg font-bold text-purple-400 uppercase tracking-tighter glow-text">{state.character.name}</h2>
                         <div className="text-[9px] text-gray-500 font-black">{state.character.race}</div>
                     </div>
+
+                    {/* Vida */}
                     <div className="space-y-4">
                         <div className="flex justify-between text-[10px] uppercase font-bold text-gray-400">
                             <span className="flex items-center gap-1"><Heart className="w-3 h-3 text-rose-500" /> HP</span>
@@ -212,11 +212,29 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
                             <div className="h-full bg-gradient-to-r from-rose-700 to-rose-500 transition-all duration-500" style={{ width: `${(state.character.hp / state.character.maxHp) * 100}%` }} />
                         </div>
                     </div>
+
+                    {/* Atributos */}
                     <div className="grid grid-cols-2 gap-2">
                         <StatBox label="FUE" value={state.character.attributes.fuerza} />
                         <StatBox label="AGI" value={state.character.attributes.agilidad} />
                         <StatBox label="INT" value={state.character.attributes.intelecto} />
                         <StatBox label="PRE" value={state.character.attributes.presencia} />
+                    </div>
+
+                    {/* Inventario Híbrido */}
+                    <div className="space-y-2">
+                        <h3 className="text-[9px] text-gray-500 uppercase tracking-widest flex items-center gap-2 font-black">
+                            <Backpack className="w-3 h-3" /> Equipo
+                        </h3>
+                        <div className="text-[10px] space-y-1 bg-black/30 p-2 rounded-sm max-h-32 overflow-y-auto border border-white/5">
+                            {state.character.inventory.length > 0 ? (
+                                state.character.inventory.map((item, i) => (
+                                    <div key={i} className="text-purple-300 flex items-center gap-1">• {item}</div>
+                                ))
+                            ) : (
+                                <div className="text-gray-700 italic text-[9px]">Bolsillos vacíos...</div>
+                            )}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -225,7 +243,7 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
             <div className={cn("lg:col-span-3 flex flex-col border overflow-hidden relative rounded-sm shadow-2xl transition-all duration-700",
                 state.inCombat ? "border-rose-600 bg-rose-950/5" : "terminal-border bg-black/40")}>
 
-                {/* Header de Estado de Turnos */}
+                {/* Header Turnos */}
                 <div className="bg-black/80 border-b border-white/5 p-3 flex items-center justify-between z-10">
                     <div className="flex items-center gap-4">
                         <div className="flex -space-x-2">
@@ -236,24 +254,28 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
                                 </div>
                             ))}
                         </div>
-                        <span className="text-[9px] text-gray-400 uppercase tracking-[0.2em] font-bold">
-                            {pendingActions.length === onlinePlayers.length
-                                ? "PROCESANDO RELATO..."
-                                : `ESPERANDO TURNOS (${pendingActions.length}/${onlinePlayers.length})`}
-                        </span>
+                        <div className="flex flex-col">
+                            <span className="text-[9px] text-gray-400 uppercase tracking-[0.2em] font-bold">
+                                {pendingActions.length >= onlinePlayers.length && onlinePlayers.length > 0
+                                    ? "PROCESANDO RELATO..."
+                                    : `ESPERANDO TURNOS (${pendingActions.length}/${onlinePlayers.length})`}
+                            </span>
+                            <span className="text-[8px] text-purple-500 font-mono tracking-widest">{currentRoom.name.toUpperCase()}</span>
+                        </div>
                     </div>
                     {isTyping && <Clock className="w-3 h-3 text-purple-500 animate-spin" />}
                 </div>
 
+                {/* Historial */}
                 <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-6 scroll-smooth">
                     {state.history.map((msg, i) => (
                         <div key={i} className={cn("max-w-[85%] text-sm animate-in fade-in slide-in-from-bottom-2 duration-500",
                             msg.role === 'user' ? "ml-auto" : "mr-auto",
                             msg.role === 'system' && "w-full text-center text-[9px] text-gray-600 uppercase tracking-[0.3em] py-4 border-y border-white/5 my-4")}>
                             {msg.role !== 'system' && (
-                                <div className={cn("p-4 rounded-sm", msg.role === 'user' ? "bg-purple-900/10 border-r-2 border-purple-500" : "bg-gray-900/60 border-l-2 border-gray-400 text-gray-300 shadow-xl")}>
+                                <div className={cn("p-4 rounded-sm transition-all hover:bg-opacity-80", msg.role === 'user' ? "bg-purple-900/10 border-r-2 border-purple-500" : "bg-gray-900/60 border-l-2 border-gray-400 text-gray-300 shadow-xl")}>
                                     <div className="text-[8px] uppercase tracking-[0.2em] mb-2 font-black text-gray-500 flex justify-between">
-                                        <span>{msg.role === 'assistant' ? 'EL MASTER' : (msg.playerName || 'HÉROE')}</span>
+                                        <span>{msg.role === 'assistant' ? 'EL NARRADOR' : (msg.playerName || 'HÉROE')}</span>
                                         {msg.role === 'user' && <CheckCircle2 className="w-3 h-3 text-purple-500" />}
                                     </div>
                                     <p className="font-medium whitespace-pre-wrap leading-relaxed italic">{msg.content}</p>
@@ -263,8 +285,8 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
                         </div>
                     ))}
 
-                    {/* Visualización de acciones pendientes antes de la respuesta del Master */}
-                    <div className="space-y-2 opacity-50">
+                    {/* Pendientes */}
+                    <div className="space-y-2 opacity-50 px-6">
                         {pendingActions.map((action, idx) => (
                             <div key={idx} className="text-[10px] text-gray-500 italic flex items-center gap-2 animate-pulse">
                                 <span className="font-black uppercase">{action.playerName}:</span> &ldquo;{action.content}&rdquo;
@@ -273,6 +295,7 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
                     </div>
                 </div>
 
+                {/* Input */}
                 {!state.isGameOver ? (
                     <div className="p-4 border-t border-white/5 bg-black/80">
                         <form onSubmit={handleSubmit} className="flex items-center gap-4 relative">
@@ -282,7 +305,7 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
                                 onChange={(e) => setInput(e.target.value)}
                                 disabled={hasSentAction || isTyping}
                                 autoFocus
-                                placeholder={hasSentAction ? "Esperando al resto del grupo..." : "¿Qué haces tú?"}
+                                placeholder={hasSentAction ? "El destino está siendo escrito..." : `¿Qué harás en ${currentRoom.name}?`}
                                 className="flex-1 bg-transparent focus:outline-none text-purple-300 uppercase text-xs tracking-widest font-bold placeholder:text-gray-800"
                             />
                             <button type="submit" disabled={hasSentAction || isTyping || !input.trim()} className="text-purple-500 hover:text-purple-400 disabled:text-gray-900 transition-all">
@@ -292,16 +315,16 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
                     </div>
                 ) : (
                     <div className="p-8 text-center bg-black/95 border-t border-red-900 text-red-500 font-black uppercase text-[10px] tracking-[0.5em] cursor-pointer hover:bg-black transition-all" onClick={() => window.location.reload()}>
-                        LOS ECOS SE HAN APAGADO. CLICK PARA REINTENTAR.
+                        FIN DEL RELATO. CLICK PARA REENCARNAR.
                     </div>
                 )}
             </div>
 
-            {/* Lista de Héroes y Presencia */}
+            {/* Panel Derecho */}
             <div className="lg:col-span-1 space-y-4">
                 <div className="terminal-border bg-black/60 p-4 h-full flex flex-col">
                     <h3 className="text-[9px] text-purple-500 uppercase font-black border-b border-purple-900/30 pb-2 mb-4 flex items-center gap-2">
-                        <Users className="w-3 h-3" /> Compañeros ({onlinePlayers.length})
+                        <Users className="w-3 h-3" /> Grupo ({onlinePlayers.length})
                     </h3>
                     <div className="space-y-4 overflow-y-auto flex-1">
                         {onlinePlayers.map(p => (
@@ -323,7 +346,6 @@ export default function GameTerminal({ state, setState }: GameTerminalProps) {
                         ))}
                     </div>
 
-                    {/* Restauración del Código de Sala */}
                     <div className="mt-4 pt-4 border-t border-white/10">
                         <div className="bg-purple-950/20 p-2 rounded-sm border border-purple-900/30">
                             <div className="text-[7px] text-purple-600 uppercase font-black tracking-widest mb-1">Código de Invitación</div>

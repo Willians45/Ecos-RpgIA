@@ -17,9 +17,10 @@ export default function Home() {
       roomId: code,
       players: [],
       character: null,
-      currentRoom: INITIAL_ROOMS[0],
+      currentRoomId: 'start',
+      worldState: {},
       history: [
-        { role: 'assistant', content: INITIAL_ROOMS[0].description }
+        { role: 'assistant', content: INITIAL_ROOMS['start'].description }
       ],
       inCombat: false,
       isGameOver: false,
@@ -33,9 +34,10 @@ export default function Home() {
       roomId: code,
       players: [],
       character: null,
-      currentRoom: INITIAL_ROOMS[0],
+      currentRoomId: 'start',
+      worldState: {},
       history: [
-        { role: 'assistant', content: INITIAL_ROOMS[0].description }
+        { role: 'assistant', content: INITIAL_ROOMS['start'].description }
       ],
       inCombat: false,
       isGameOver: false,
